@@ -24,7 +24,7 @@ generic_url = st.text_input("URL", label_visibility="collapsed")
 
 
 # ------------------- LLM -------------------
-llm = ChatGroq(groq_api_key=groq_api_key, model_name="llama3-70b-8192")
+llm = ChatGroq(groq_api_key=groq_api_key, model_name="openai/gpt-oss-120b")
 
 Prompt_template = """
 Provide a clear and concise summary of the following content in about 1000 words. 
@@ -98,3 +98,4 @@ if st.button("Summarize the Content"):
 
         except Exception as e:
             st.exception(e)
+
