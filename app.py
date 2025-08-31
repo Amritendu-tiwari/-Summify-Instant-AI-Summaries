@@ -32,8 +32,7 @@ Highlight the key points and important takeaways.
 
 Content: {text}
 """
-prompt = PromptTemplate( input_variables=["text"])
-
+prompt = PromptTemplate(template=Prompt_template, input_variables=["text"])
 
 # ------------------- FUNCTIONS -------------------
 def extract_video_id(url: str) -> str:
@@ -98,5 +97,6 @@ if st.button("Summarize the Content"):
 
         except Exception as e:
             st.exception(e)
+
 
 
