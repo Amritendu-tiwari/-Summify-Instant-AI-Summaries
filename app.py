@@ -4,10 +4,9 @@ import streamlit as st
 from urllib.parse import urlparse, parse_qs
 
 from langchain_core.prompts import PromptTemplate
-from langchain_groq import ChatGroq
-from langchain.chains.summarize import load_summarize_chain
-from langchain_community.document_loaders import UnstructuredURLLoader
 from langchain_core.documents import Document
+from langchain_groq import ChatGroq
+from langchain_community.document_loaders import UnstructuredURLLoader
 
 from youtube_transcript_api import YouTubeTranscriptApi
 from pytubefix import YouTube as YouTubeFix
@@ -26,75 +25,78 @@ generic_url = st.text_input("URL", placeholder="Paste a website or YouTube link"
 
 # ------------------- PROMPT -------------------
 PROMPT_TEMPLATE = """
-Provide a clear and concise summary of the following content in about 300-500 words.
-Highlight the key points and important takeaways.
+You are a helpful summarization assistant.
+
+Summarize the following content clearly and concisely in about 400-700 words.
+Highlight:
+- the main topic
+- key points
+- important takeaways
+- any conclusion or final message
 
 Content:
 {text}
 """
 
-prompt = PromptTemplate(template=PROMPT_TEMPLATE, input_variables=["text"])
+prompt = PromptTemplate(
+    template=PROMPT_TEMPLATE,
+    input_variables=["text"]
+)
 
 
-# ------------------- FUNCTIONS -------------------
+# ------------------- HELPERS -------------------
 def extract_video_id(url: str) -> str | None:
-    """Extract YouTube video ID from a URL."""
+    """Extract YouTube video ID from URL."""
     parsed = urlparse(url)
 
     if parsed.hostname in ["www.youtube.com", "youtube.com", "m.youtube.com"]:
         return parse_qs(parsed.query).get("v", [None])[0]
-
-    if parsed.hostname == "youtu.be":
+    elif parsed.hostname == "youtu.be":
         return parsed.path.lstrip("/")
 
     return None
 
 
 def get_youtube_text(youtube_url: str) -> str:
-    """
-    Try transcript first.
-    If transcript is unavailable, fall back to title + description.
-    """
+    """Fetch transcript; if unavailable, fall back to title + description."""
     video_id = extract_video_id(youtube_url)
     if not video_id:
         raise ValueError("Invalid YouTube URL")
 
-    # youtube-transcript-api supports fetch(video_id)
+    # Try transcript first
     try:
-        ytt_api = YouTubeTranscriptApi()
-        transcript = ytt_api.fetch(video_id)
-        text_parts = []
+        transcript = YouTubeTranscriptApi().fetch(video_id)
 
+        parts = []
         for item in transcript:
             if isinstance(item, dict):
-                text_parts.append(item.get("text", ""))
+                parts.append(item.get("text", ""))
             else:
-                text_parts.append(getattr(item, "text", ""))
+                parts.append(getattr(item, "text", ""))
 
-        full_text = " ".join(part for part in text_parts if part).strip()
-        if full_text:
-            return full_text
-
+        text = " ".join(part for part in parts if part).strip()
+        if text:
+            return text
     except Exception:
         pass
 
+    # Fallback to pytubefix
     try:
         yt = YouTubeFix(youtube_url)
-        title = yt.title or "YouTube Video"
+        title = yt.title or ""
         description = yt.description or ""
-        combined = f"{title}\n\n{description}".strip()
+        fallback_text = f"{title}\n\n{description}".strip()
 
-        if not combined:
-            raise RuntimeError("No transcript, title, or description available.")
+        if not fallback_text:
+            raise RuntimeError("No transcript or metadata available.")
 
-        return combined
-
+        return fallback_text
     except Exception as ex:
         raise RuntimeError(f"Unable to fetch YouTube content: {ex}") from ex
 
 
-def load_content_from_url(url: str):
-    """Load content from either YouTube or a regular webpage."""
+def load_content_from_url(url: str) -> list[Document]:
+    """Load text content from a webpage or YouTube video."""
     if "youtube.com" in url or "youtu.be" in url:
         text = get_youtube_text(url)
         return [Document(page_content=text)]
@@ -113,7 +115,29 @@ def load_content_from_url(url: str):
     return loader.load()
 
 
-# ------------------- SUMMARIZATION -------------------
+def summarize_docs(docs: list[Document], groq_api_key: str) -> str:
+    """Summarize documents using modern LangChain runnable style."""
+    if not docs:
+        raise ValueError("No documents found to summarize.")
+
+    full_text = "\n\n".join(doc.page_content for doc in docs if doc.page_content).strip()
+    if not full_text:
+        raise ValueError("The extracted content is empty.")
+
+    llm = ChatGroq(
+        groq_api_key=groq_api_key,
+        model_name="openai/gpt-oss-120b",
+    )
+
+    chain = prompt | llm
+
+    response = chain.invoke({"text": full_text})
+
+    # AIMessage -> string
+    return getattr(response, "content", str(response))
+
+
+# ------------------- MAIN ACTION -------------------
 if st.button("Summarize the Content"):
     if not groq_api_key.strip():
         st.error("Please enter your Groq API key.")
@@ -124,28 +148,10 @@ if st.button("Summarize the Content"):
     else:
         try:
             with st.spinner("Fetching and summarizing..."):
-                llm = ChatGroq(
-                    groq_api_key=groq_api_key,
-                    model_name="openai/gpt-oss-120b",
-                )
-
                 docs = load_content_from_url(generic_url)
-
-                if not docs:
-                    st.error("No content could be extracted from the URL.")
-                else:
-                    chain = load_summarize_chain(
-                        llm=llm,
-                        chain_type="stuff",
-                        prompt=prompt,
-                        verbose=False,
-                    )
-
-                    summary = chain.invoke(docs)
-                    if isinstance(summary, dict) and "output_text" in summary:
-                        st.success(summary["output_text"])
-                    else:
-                        st.success(str(summary))
+                summary = summarize_docs(docs, groq_api_key)
+                st.success("Summary generated successfully.")
+                st.write(summary)
 
         except Exception as e:
             st.exception(e)
