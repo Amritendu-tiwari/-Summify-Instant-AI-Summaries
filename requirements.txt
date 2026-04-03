@@ -31,3 +31,14 @@ pytube
 numexpr
 huggingface_hub
 pytubefix
+streamlit
+validators
+langchain
+langchain-core
+langchain-community
+langchain-groq
+youtube-transcript-api
+pytubefix
+unstructured
+beautifulsoup4
+lxml
